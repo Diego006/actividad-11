@@ -1,0 +1,163 @@
+---
+title: "AYUDANTIA 11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(psych)
+library(dplyr)
+library(stringr)
+library(datasets.load)
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(quanteda)
+library(quanteda.textstats)
+library(ggplot2)
+library(wordcloud)
+library(lubridate)
+library(readxl)
+library(chron)
+library(factoextra)
+library(flexclust)
+library(cluster)
+library(ggdendro)
+library(factoextra)
+library(knitr)
+library(mclust)
+library(dbscan)
+library(e1071)
+library(olsrr)
+library(pROC)
+library(class)
+library(discrim)
+library(tidymodels)
+library(naivebayes)
+library(kknn)
+library(patchwork)
+
+
+```
+
+Leemos el arcchivo y cargamos los datos
+
+```{r}
+setwd("C:/Users/Dieca/OneDrive/Escritorio/ayundantia 11")
+creditcard <- read.csv("UCI_Credit_Card.csv", sep = ",")
+glimpse(creditcard)
+
+str(creditcard)
+```
+
+```{r}
+creditcard$ID <- NULL
+
+creditcard$SEX <- factor(creditcard$SEX, levels=1:2, labels=c("Male", "Female"))
+creditcard$EDUCATION <- as.factor(creditcard$EDUCATION)
+creditcard$MARRIAGE <- as.factor(creditcard$MARRIAGE)
+creditcard$default.payment.next.month <- factor(creditcard$default.payment.next.month, levels = 0:1, labels=c("No", "Yes"))
+
+```
+
+
+##arboles de decision 
+
+
+El primer paso que hacemos es separar la data en conjunto de entrenamiento y de prueba, donde tidymodels tiene la funcion initial_split
+```{r}
+
+data_split <- initial_split(creditcard, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+
+nrow(test_data)
+#train_data %>% nrow()
+
+```
+Luego, creamos la “receta” del modelo, que consiste en la relacion de “caja negra” entre las variables de entrada y las variables de salida. En este caso, la receta será modelar Exited en funcion de todas las variables presentes en el conjunto de datos.
+
+```{r}
+receta <- 
+  recipe(default.payment.next.month ~ ., data = train_data) 
+
+receta
+```
+
+Ahora si creamos el modelo, donde utilizaremos un arbol de decision con 5 capas de decision, y un minimo numero de entidades por hoja (poda) de 10. La libreria que se utiliza para calcular este modelo sera la de rpart, que viene precargada en los paquetes que estamos utilizando. Con este paso solo definimos el modelo, aun lo calculamos.
+
+```{r}
+modelo <-
+  decision_tree(tree_depth = 5, min_n = 10) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+modelo
+```
+Ahora hacemos el fit del modelo, calculamos sus predicciones y calculamos el valor de AUC
+```{r}
+fitea <- function(mod){
+  
+  modelo_fit <- 
+  workflow() %>% 
+  add_model(modelo) %>% 
+  add_recipe(receta) %>% 
+  fit(data = train_data)
+
+model_pred <- 
+  predict(modelo_fit, test_data, type = "prob") %>% 
+  bind_cols(test_data) 
+
+return(model_pred %>% 
+  roc_auc(truth = default.payment.next.month, .pred_0))
+}
+##fitea(modelo)
+```
+Ahora veremos la magia de tidymodels, haremos una comparacion con otros modelos, como el modelo de regresion logistica, naive bayes o Knn. Para esto, lo unico que debemos cambiar es el modelo, ya que la receta es la misma, y el flujo de validacion tambien es el mismo. Por lo tanto podemos utilizar la funcion que creamos mas arriba para evaluar los diferentes modelos y compararlos.
+
+```{r}
+modelo_rl <- 
+  logistic_reg() %>% 
+  set_engine("glm")
+
+#fitea(modelo_rl)
+```
+
+```{r}
+modelo_nb <-
+  naive_Bayes(smoothness = .8) %>%
+  set_engine("naivebayes")
+
+#fitea(modelo_nb)
+```
+
+```{r}
+modelo_knn <-
+  nearest_neighbor(neighbors = 5) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+#fitea(modelo_knn)
+```
+
+
+ahora realizaremos la prediccion .  
+
+```{r}
+
+modelo_fit <- 
+  workflow() %>% 
+  add_model(modelo_knn) %>% 
+  add_recipe(receta) %>% 
+  fit(data = train_data)
+
+model_pred <- 
+  predict(modelo_fit, test_data, type = "prob") %>% 
+  bind_cols(test_data)
+view(model_pred)
+```
